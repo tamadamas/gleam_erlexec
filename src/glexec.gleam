@@ -5,11 +5,11 @@
 //// For more detailed documentation, please refer to
 //// https://hexdocs.pm/erlexec/exec.html
 
-import gleam/dynamic.{type Dynamic, from}
-import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom.{type Atom}
 import gleam/erlang/process.{type Pid}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 
 // Just a bunch of symbols used all over the place
 type ExecAtom {
@@ -38,7 +38,6 @@ type ExecAtom {
   Pty
   PtyEcho
   Stdin
-  String
   SuccessExitCode
   Sync
   User
@@ -126,7 +125,7 @@ pub type Command {
   /// an untrusted source makes a program vulnerable to shell injection, a
   /// serious security flaw which can result in arbitrary command execution. For
   /// this reason, the use of shell is strongly discouraged in cases where the
-  /// command string is constructed from external input. 
+  /// command string is constructed from external input.
   Shell(String)
   /// Command is passed to `execve(3)` library call directly without involving
   /// the shell process, so the list of strings represents the program to be
@@ -148,7 +147,6 @@ pub type EnvOptions =
 pub type StdoutOptions {
   StdoutCapture
   StdoutClose
-  StdoutFun(fn(Atom, Int, String) -> Nil)
   StdoutNull
   StdoutPid(Pid)
   StdoutPrint
@@ -159,7 +157,6 @@ pub type StdoutOptions {
 pub type StderrOptions {
   StderrCapture
   StderrClose
-  StderrFun(fn(Atom, Int, String) -> Nil)
   StderrNull
   StderrPid(Pid)
   StderrPrint
@@ -257,6 +254,21 @@ type WinszOptions {
 @external(erlang, "exec", "debug")
 pub fn debug(level: Int) -> Result(Int, Atom)
 
+@external(erlang, "gleam_erlang_ffi", "identity")
+pub fn tuple_to_dynamic(a: #(Dynamic, Dynamic)) -> dynamic.Dynamic
+
+@external(erlang, "gleam_erlang_ffi", "identity")
+fn exec_atom_to_dynamic(e: ExecAtom) -> Dynamic
+
+@external(erlang, "gleam_erlang_ffi", "identity")
+fn pid_to_dynamic(e: Pid) -> Dynamic
+
+fn strings_to_dynamic(list: List(String)) -> Dynamic {
+  list
+  |> list.map(dynamic.string)
+  |> dynamic.list
+}
+
 pub type StartError {
   AlreadyStarted(Pid)
 }
@@ -285,14 +297,24 @@ fn start_options_to_list(options) {
   options
   |> list.map(fn(o) {
     case o {
-      StartDebug(v) -> from(#(Debug, v))
-      StartAlarm(v) -> from(#(Alarm, v))
-      StartArgs(v) -> from(#(Args, v))
-      StartLimitUsers(v) -> from(#(LimitUsers, v))
-      StartPortexe(v) -> from(#(Portexe, v))
-      StartRoot(v) -> from(#(Root, v))
-      StartUser(v) -> from(#(User, v))
-      StartVerbose -> from(Verbose)
+      StartDebug(v) ->
+        tuple_to_dynamic(#(exec_atom_to_dynamic(Debug), dynamic.int(v)))
+      StartAlarm(v) ->
+        tuple_to_dynamic(#(exec_atom_to_dynamic(Alarm), dynamic.int(v)))
+      StartArgs(v) ->
+        tuple_to_dynamic(#(exec_atom_to_dynamic(Args), strings_to_dynamic(v)))
+      StartLimitUsers(v) ->
+        tuple_to_dynamic(#(
+          exec_atom_to_dynamic(LimitUsers),
+          strings_to_dynamic(v),
+        ))
+      StartPortexe(v) ->
+        tuple_to_dynamic(#(exec_atom_to_dynamic(Portexe), dynamic.string(v)))
+      StartRoot(v) ->
+        tuple_to_dynamic(#(exec_atom_to_dynamic(Root), dynamic.bool(v)))
+      StartUser(v) ->
+        tuple_to_dynamic(#(exec_atom_to_dynamic(User), dynamic.string(v)))
+      StartVerbose -> exec_atom_to_dynamic(Verbose)
       StartEnv(v) -> env_to_dynamic(v)
     }
   })
@@ -315,7 +337,7 @@ pub fn stop(pid: Int) -> Result(Nil, String)
 fn do_manage(a: Dynamic, b: List(Dynamic), c: Int) -> Dynamic
 
 pub fn manage_pid(pid: Pid, options: Options) {
-  do_manage(from(pid), options_to_list(options), options.timeout)
+  do_manage(pid_to_dynamic(pid), options_to_list(options), options.timeout)
 }
 
 /// Get a list of children OsPids managed by the port program.
@@ -327,12 +349,12 @@ fn do_kill(a: Dynamic, b: Int) -> Result(Nil, Dynamic)
 
 /// Send a signal to a child Pid.
 pub fn kill_pid(pid: Pid, signal: Int) -> Result(Nil, Dynamic) {
-  do_kill(from(pid), signal)
+  do_kill(pid_to_dynamic(pid), signal)
 }
 
 /// Send a signal to an OsPid.
 pub fn kill_ospid(ospid: OsPid, signal: Int) -> Result(Nil, Dynamic) {
-  do_kill(from(ospid), signal)
+  do_kill(dynamic.int(ospid), signal)
 }
 
 /// Set up a monitor for the spawned process.
@@ -356,7 +378,7 @@ pub fn get_monitor(options: Options) {
 
 fn set_monitor(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.monitor {
-    True -> [from(Monitor), ..old]
+    True -> [exec_atom_to_dynamic(Monitor), ..old]
     False -> old
   }
 }
@@ -367,7 +389,7 @@ pub fn with_verbose(old: Options, enabled: Bool) -> Options {
 
 fn set_sync(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.sync {
-    True -> [from(Sync), ..old]
+    True -> [exec_atom_to_dynamic(Sync), ..old]
     False -> old
   }
 }
@@ -387,7 +409,7 @@ pub fn get_link(options: Options) {
 
 fn set_link(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.link {
-    True -> [from(Link), ..old]
+    True -> [exec_atom_to_dynamic(Link), ..old]
     False -> old
   }
 }
@@ -403,7 +425,7 @@ fn set_link(old: List(Dynamic), option: Options) -> List(Dynamic) {
 /// parameter.
 /// Most programs treat the program specified by `args` as the command name,
 /// which can then be different from the program actually executed.
-/// 
+///
 /// ### Unix specific:
 ///
 /// The `args` name becomes the display name for the executable in utilities
@@ -421,7 +443,13 @@ pub fn get_executable(options: Options) {
 
 fn set_executable(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.executable {
-    Some(executable) -> [from(#(Executable, executable)), ..old]
+    Some(executable) -> [
+      tuple_to_dynamic(#(
+        exec_atom_to_dynamic(Executable),
+        dynamic.string(executable),
+      )),
+      ..old
+    ]
     None -> old
   }
 }
@@ -437,7 +465,10 @@ pub fn get_cd(options: Options) {
 
 fn set_cd(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.cd {
-    Some(cd) -> [from(#(Cd, cd)), ..old]
+    Some(cd) -> [
+      tuple_to_dynamic(#(exec_atom_to_dynamic(Cd), dynamic.string(cd))),
+      ..old
+    ]
     None -> old
   }
 }
@@ -459,15 +490,18 @@ fn set_env(old: List(Dynamic), option: Options) -> List(Dynamic) {
 }
 
 fn env_to_dynamic(env: EnvOptions) {
-  from(#(Env, list.map(env, env_element_to_dynamic)))
+  tuple_to_dynamic(#(
+    exec_atom_to_dynamic(Env),
+    dynamic.list(list.map(env, env_element_to_dynamic)),
+  ))
 }
 
 fn env_element_to_dynamic(element) {
   case element {
-    EnvString(s) -> from(s)
-    EnvClear -> from(Clear)
-    EnvKV(k, v) -> from(#(k, v))
-    EnvUnset(k) -> from(#(k, False))
+    EnvString(s) -> dynamic.string(s)
+    EnvClear -> exec_atom_to_dynamic(Clear)
+    EnvKV(k, v) -> tuple_to_dynamic(#(dynamic.string(k), dynamic.string(v)))
+    EnvUnset(k) -> tuple_to_dynamic(#(dynamic.string(k), dynamic.bool(False)))
   }
 }
 
@@ -482,19 +516,19 @@ pub fn get_stdout(options: Options) {
 }
 
 fn set_stdout(old: List(Dynamic), option: Options) -> List(Dynamic) {
-  let stdout = atom.create_from_string("stdout")
-  let stderr = atom.create_from_string("stderr")
+  let stdout = atom.create("stdout") |> atom.to_dynamic
+  let stderr = atom.create("stderr") |> atom.to_dynamic
+
   case option.stdout {
     Some(value) -> [
       case value {
-        StdoutCapture -> from(stdout)
-        StdoutNull -> from(#(stdout, Null))
-        StdoutClose -> from(#(stdout, Close))
-        StdoutPid(pid) -> from(#(stdout, pid))
-        StdoutPrint -> from(#(stdout, Print))
-        StdoutStderr -> from(#(stdout, stderr))
-        StdoutString(s) -> from(#(stdout, s))
-        StdoutFun(f) -> from(#(stdout, f))
+        StdoutCapture -> stdout
+        StdoutNull -> tuple_to_dynamic(#(stdout, exec_atom_to_dynamic(Null)))
+        StdoutClose -> tuple_to_dynamic(#(stdout, exec_atom_to_dynamic(Close)))
+        StdoutPid(pid) -> tuple_to_dynamic(#(stdout, pid_to_dynamic(pid)))
+        StdoutPrint -> tuple_to_dynamic(#(stdout, exec_atom_to_dynamic(Print)))
+        StdoutStderr -> tuple_to_dynamic(#(stdout, stderr))
+        StdoutString(s) -> tuple_to_dynamic(#(stdout, dynamic.string(s)))
       },
       ..old
     ]
@@ -513,19 +547,19 @@ pub fn get_stderr(options: Options) {
 }
 
 fn set_stderr(old: List(Dynamic), option: Options) -> List(Dynamic) {
-  let stdout = atom.create_from_string("stdout")
-  let stderr = atom.create_from_string("stderr")
+  let stdout = atom.create("stdout") |> atom.to_dynamic
+  let stderr = atom.create("stderr") |> atom.to_dynamic
+
   case option.stderr {
     Some(value) -> [
       case value {
-        StderrCapture -> from(stderr)
-        StderrNull -> from(#(stderr, Null))
-        StderrClose -> from(#(stderr, Close))
-        StderrPid(pid) -> from(#(stderr, pid))
-        StderrPrint -> from(#(stderr, Print))
-        StderrStdout -> from(#(stderr, stdout))
-        StderrString(s) -> from(#(stderr, s))
-        StderrFun(f) -> from(#(stderr, f))
+        StderrCapture -> stderr
+        StderrNull -> tuple_to_dynamic(#(stderr, exec_atom_to_dynamic(Close)))
+        StderrClose -> tuple_to_dynamic(#(stderr, exec_atom_to_dynamic(Close)))
+        StderrPid(pid) -> tuple_to_dynamic(#(stderr, pid_to_dynamic(pid)))
+        StderrPrint -> tuple_to_dynamic(#(stderr, exec_atom_to_dynamic(Print)))
+        StderrStdout -> tuple_to_dynamic(#(stderr, stdout))
+        StderrString(s) -> tuple_to_dynamic(#(stderr, dynamic.string(s)))
       },
       ..old
     ]
@@ -547,10 +581,19 @@ fn set_stdin(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.stdin {
     Some(stdin) -> [
       case stdin {
-        StdinClose -> from(#(Stdin, Close))
-        StdinNull -> from(#(Stdin, Null))
-        StdinPipe -> from(Stdin)
-        StdinFrom(s) -> from(#(Stdin, s))
+        StdinClose ->
+          tuple_to_dynamic(#(
+            exec_atom_to_dynamic(Stdin),
+            exec_atom_to_dynamic(Close),
+          ))
+        StdinNull ->
+          tuple_to_dynamic(#(
+            exec_atom_to_dynamic(Stdin),
+            exec_atom_to_dynamic(Null),
+          ))
+        StdinPipe -> exec_atom_to_dynamic(Stdin)
+        StdinFrom(s) ->
+          tuple_to_dynamic(#(exec_atom_to_dynamic(Stdin), dynamic.string(s)))
       },
       ..old
     ]
@@ -569,7 +612,7 @@ pub fn get_pty(options: Options) {
 
 fn set_pty(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.pty {
-    True -> [from(Pty), ..old]
+    True -> [exec_atom_to_dynamic(Pty), ..old]
     False -> old
   }
 }
@@ -593,7 +636,10 @@ pub fn get_kill(options: Options) {
 
 fn set_kill(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.kill {
-    Some(kill) -> [from(#(Kill, kill)), ..old]
+    Some(kill) -> [
+      tuple_to_dynamic(#(exec_atom_to_dynamic(Kill), dynamic.string(kill))),
+      ..old
+    ]
     None -> old
   }
 }
@@ -607,7 +653,13 @@ pub fn with_kill_timeout(old: Options, given: Int) -> Options {
 
 fn set_kill_timeout(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.kill_timeout {
-    Some(kill_timeout) -> [from(#(KillTimeout, kill_timeout)), ..old]
+    Some(kill_timeout) -> [
+      tuple_to_dynamic(#(
+        exec_atom_to_dynamic(KillTimeout),
+        dynamic.int(kill_timeout),
+      )),
+      ..old
+    ]
     None -> old
   }
 }
@@ -620,7 +672,10 @@ pub fn with_group(old: Options, given: Int) -> Options {
 
 fn set_group(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.group {
-    Some(group) -> [from(#(Group, group)), ..old]
+    Some(group) -> [
+      tuple_to_dynamic(#(exec_atom_to_dynamic(Group), dynamic.int(group))),
+      ..old
+    ]
     None -> old
   }
 }
@@ -634,7 +689,10 @@ pub fn with_user(old: Options, given: String) -> Options {
 
 fn set_user(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.user {
-    Some(user) -> [from(#(User, user)), ..old]
+    Some(user) -> [
+      tuple_to_dynamic(#(exec_atom_to_dynamic(User), dynamic.string(user))),
+      ..old
+    ]
     None -> old
   }
 }
@@ -647,7 +705,10 @@ pub fn with_winsz(old: Options, rows: Int, columns: Int) -> Options {
 fn set_winsz(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.winsz {
     Some(PseudoTerminalSize(rows: rows, columns: columns)) -> [
-      from(#(Winsz, #(rows, columns))),
+      tuple_to_dynamic(#(
+        exec_atom_to_dynamic(Winsz),
+        tuple_to_dynamic(#(dynamic.int(rows), dynamic.int(columns))),
+      )),
       ..old
     ]
     None -> old
@@ -670,7 +731,10 @@ pub fn with_nice(old: Options, priority: Int) -> Options {
 
 fn set_nice(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.nice {
-    Some(nice) -> [from(#(Nice, nice)), ..old]
+    Some(nice) -> [
+      tuple_to_dynamic(#(exec_atom_to_dynamic(Nice), dynamic.int(nice))),
+      ..old
+    ]
     None -> old
   }
 }
@@ -684,7 +748,10 @@ pub fn with_debug(old: Options, level: Int) -> Options {
 
 fn set_debug(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.debug {
-    Some(debug) -> [from(#(Debug, debug)), ..old]
+    Some(debug) -> [
+      tuple_to_dynamic(#(exec_atom_to_dynamic(Debug), dynamic.int(debug))),
+      ..old
+    ]
     None -> old
   }
 }
@@ -697,7 +764,10 @@ pub fn with_success_exit_code(old: Options, given: Int) -> Options {
 fn set_success_exit_code(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.success_exit_code {
     Some(success_exit_code) -> [
-      from(#(SuccessExitCode, success_exit_code)),
+      tuple_to_dynamic(#(
+        exec_atom_to_dynamic(SuccessExitCode),
+        dynamic.int(success_exit_code),
+      )),
       ..old
     ]
     None -> old
@@ -712,7 +782,7 @@ pub fn with_kill_group(old: Options, given: Bool) -> Options {
 
 fn set_kill_group(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.kill_group {
-    True -> [from(KillGroup), ..old]
+    True -> [exec_atom_to_dynamic(KillGroup), ..old]
     False -> old
   }
 }
@@ -724,7 +794,7 @@ pub fn with_pty_echo(old: Options, given: Bool) -> Options {
 
 fn set_pty_echo(old: List(Dynamic), option: Options) -> List(Dynamic) {
   case option.pty_echo {
-    True -> [from(PtyEcho), ..old]
+    True -> [exec_atom_to_dynamic(PtyEcho), ..old]
     False -> old
   }
 }
@@ -758,8 +828,10 @@ fn do_run_sync(a: Dynamic, b: List(Dynamic), c: Int) -> Result(Output, RunError)
 pub fn run_async(options: Options, command: Command) -> Result(Pids, String) {
   let cmd_options = options_to_list(Options(..options, sync: False))
   case command {
-    Execve(cmd) -> do_run_async(from(cmd), cmd_options, options.timeout)
-    Shell(cmd) -> do_run_async(from(cmd), cmd_options, options.timeout)
+    Execve(cmd) ->
+      do_run_async(strings_to_dynamic(cmd), cmd_options, options.timeout)
+    Shell(cmd) ->
+      do_run_async(dynamic.string(cmd), cmd_options, options.timeout)
   }
 }
 
@@ -770,8 +842,9 @@ pub fn run_async(options: Options, command: Command) -> Result(Pids, String) {
 pub fn run_sync(options: Options, command: Command) -> Result(Output, RunError) {
   let cmd_options = options_to_list(Options(..options, sync: True))
   case command {
-    Execve(cmd) -> do_run_sync(from(cmd), cmd_options, options.timeout)
-    Shell(cmd) -> do_run_sync(from(cmd), cmd_options, options.timeout)
+    Execve(cmd) ->
+      do_run_sync(strings_to_dynamic(cmd), cmd_options, options.timeout)
+    Shell(cmd) -> do_run_sync(dynamic.string(cmd), cmd_options, options.timeout)
   }
 }
 

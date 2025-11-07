@@ -1,11 +1,9 @@
-import gleam/erlang/atom.{type Atom}
-import gleam/io
 import gleam/list
 import gleam/option.{Some}
-import gleam/otp/task
 import gleeunit
 import gleeunit/should
 import glexec as exec
+import taskle as task
 
 pub fn main() {
   gleeunit.main()
@@ -196,18 +194,8 @@ fn test_std(options) {
 pub fn send_test() {
   let exec.Pids(_pid, os_pid) =
     exec.new()
-    |> exec.with_stdout(
-      exec.StdoutFun(fn(kind: Atom, pid: Int, line: String) -> Nil {
-        io.debug(#(kind, pid, line))
-        Nil
-      }),
-    )
-    |> exec.with_stderr(
-      exec.StderrFun(fn(kind: Atom, pid: Int, line: String) -> Nil {
-        io.debug(#(kind, pid, line))
-        Nil
-      }),
-    )
+    |> exec.with_stdout(exec.StdoutCapture)
+    |> exec.with_stderr(exec.StderrCapture)
     |> exec.with_stdin(exec.StdinPipe)
     |> exec.run_async(exec.Shell("cat -"))
     |> should.be_ok()
@@ -326,6 +314,6 @@ pub fn run_error_test() {
   )
   |> should.be_error
   |> should.equal(
-    exec.RunError(25_600, [exec.Stdout(["1\n3\n"]), exec.Stderr(["2\n"])]),
+    exec.RunError(25_600, [exec.Stdout(["1\n", "3\n"]), exec.Stderr(["2\n"])]),
   )
 }
