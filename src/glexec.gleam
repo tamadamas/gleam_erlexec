@@ -815,7 +815,7 @@ pub type StdoutOrStderr {
 }
 
 pub type RunError {
-  RunError(exit_status: Int, output: List(StdoutOrStderr))
+  RunError(exit_status: Int, output: Output)
 }
 
 @external(erlang, "glexec_ffi", "run")
